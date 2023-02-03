@@ -1,14 +1,15 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-import torch.nn as nn
-import numpy as np
-import pandas as pd
-from torch.utils.data import DataLoader, Dataset, TensorDataset
-from sklearn.model_selection import train_test_split
-
 # 设置随机数种子保证论文可复现
 import random
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Dataset, TensorDataset
+from tqdm import tqdm
+
 seed = 42
 torch.manual_seed(seed)
 np.random.seed(seed)
@@ -17,15 +18,18 @@ random.seed(seed)
 
 class Args():
     def __init__(self) -> None:
-        self.batch_size = 1
+        self.batch_size = 16
         self.lr = 0.001
-        self.epochs = 10
-        self.patience = 7
+        self.epochs = 100
+        self.patience = 20
         self.device = "cpu"
-        self.data_train = np.random.randint(-20, 20, 100)
+        self.data_train = np.random.randint(-20, 20, 10000)
         self.label_train = (self.data_train > 8).astype(int)
-        self.data_val = np.random.randint(-15, 15, 20)
+        self.data_train = self.data_train.reshape(-1, 1)
+
+        self.data_val = np.random.randint(-15, 15, 50)
         self.label_val = (self.data_val > 8).astype(int)
+        self.data_val = self.data_val.reshape(-1, 1)
 
 
 args = Args()
@@ -87,12 +91,12 @@ class EarlyStopping():
 
 
 def train():
-    train_dataset = TensorDataset(torch.Tensor(
-        args.data_train), torch.Tensor(args.label_train))
+    train_dataset = TensorDataset(
+        torch.tensor(args.data_train, dtype=torch.float32), torch.tensor(args.label_train, dtype=torch.long))
     train_dataloader = DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_dataset = TensorDataset(torch.Tensor(
-        args.data_val), torch.Tensor(args.label_val))
+    valid_dataset = TensorDataset(torch.tensor(
+        args.data_val, dtype=torch.float32), torch.tensor(args.label_val, dtype=torch.long))
     valid_dataloader = DataLoader(
         dataset=valid_dataset, batch_size=args.batch_size, shuffle=True)
 
@@ -112,10 +116,10 @@ def train():
         train_epoch_loss = []
         acc, nums = 0, 0
         # =========================train=======================
-        for idx, (label, inputs) in enumerate(train_dataloader):
+        for idx, (inputs, label) in enumerate(tqdm(train_dataloader)):
             inputs = inputs.to(args.device)
             label = label.to(args.device)
-            outputs: torch.Tensor = model(inputs)
+            outputs = model(inputs)
             optimizer.zero_grad()
             loss = criterion(outputs, label)
             loss.backward()
@@ -133,7 +137,7 @@ def train():
         model.eval()
         valid_epoch_loss = []
         acc, nums = 0, 0
-        for idx, (label, inputs) in enumerate(valid_dataloader):
+        for idx, (inputs, label) in enumerate(tqdm(valid_dataloader)):
             inputs = inputs.to(args.device)
             label = label.to(args.device)
             outputs = model(inputs)
