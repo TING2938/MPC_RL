@@ -20,6 +20,10 @@ class Args():
     def __init__(self) -> None:
         self.batch_size = 16
         self.lr = 0.001
+        self.in_dim = 1
+        self.out_dim = 2
+        self.n_hidden_1 = 32
+        self.n_hidden_2 = 16
         self.epochs = 100
         self.patience = 20
         self.device = "cpu"
@@ -30,9 +34,6 @@ class Args():
         self.data_val = np.random.randint(-15, 15, 50)
         self.label_val = (self.data_val > 8).astype(int)
         self.data_val = self.data_val.reshape(-1, 1)
-
-
-args = Args()
 
 
 class MPC_model(nn.Module):
@@ -90,7 +91,7 @@ class EarlyStopping():
         self.val_loss_min = val_loss
 
 
-def train():
+def train(args: Args):
     train_dataset = TensorDataset(
         torch.tensor(args.data_train, dtype=torch.float32), torch.tensor(args.label_train, dtype=torch.long))
     train_dataloader = DataLoader(
@@ -100,7 +101,8 @@ def train():
     valid_dataloader = DataLoader(
         dataset=valid_dataset, batch_size=args.batch_size, shuffle=True)
 
-    model = MPC_model(1, 32, 16, 2).to(args.device)  # 分类问题
+    model = MPC_model(args.in_dim, args.n_hidden_1,
+                      args.n_hidden_2, args.out_dim).to(args.device)  # 分类问题
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -180,8 +182,9 @@ def train():
     torch.save(model.state_dict(), "model.pth")
 
 
-def pred(val):
-    model = MPC_model(1, 32, 16, 2)
+def pred(val, args: Args):
+    model = MPC_model(args.in_dim, args.n_hidden_1,
+                      args.n_hidden_2, args.out_dim).to(args.device)
     model.load_state_dict(torch.load('model.pth'))
     model.eval()
     val = torch.tensor(val).reshape(1, -1).float()
@@ -195,7 +198,8 @@ def pred(val):
 
 # %%
 if __name__ == '__main__':
-    train()
-    pred(24)
-    pred(3.14)
-    pred(7.8)  # 这个会预测错误，所以数据量对于深度学习很重要
+    args = Args()
+    train(args)
+    pred(24, args)
+    pred(3.14, args)
+    pred(7.8, args)  # 这个会预测错误，所以数据量对于深度学习很重要
