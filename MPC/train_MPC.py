@@ -1,6 +1,9 @@
 import gym
 import numpy as np
 
+import MPC_model as mpc
+from sklearn.model_selection import train_test_split
+
 
 def get_MPC_data(env: gym.Env, num_paths: int, horizon: int):
     paths = []
@@ -35,7 +38,7 @@ def compute_normalization(data):
 
 # %%
 env = gym.make("CartPole-v1")
-paths = get_MPC_data(env=env, num_paths=5, horizon=300)
+paths = get_MPC_data(env=env, num_paths=50000, horizon=300)
 
 all_s = np.concatenate([d["state"] for d in paths])
 all_next_s = np.concatenate([d["next_state"] for d in paths])
@@ -58,4 +61,21 @@ norm_a = (all_a - mean_a) / (std_a + 1e-7)
 norm_s_a = np.column_stack((norm_s, norm_a))
 norm_delta_s = ((all_next_s - all_s) - mean_delta_s) / (std_delta_s + 1e-7)
 
+x_train, x_test, y_train, y_test = train_test_split(
+    norm_s_a, norm_delta_s, test_size=0.2)
+
 # train input/output data
+args = mpc.Args()
+args.epochs = 20
+args.batch_size = 32
+args.lr = 0.0001
+args.in_dim = x_train.shape[1]
+args.out_dim = y_train.shape[1]
+args.n_hidden_1 = 128
+args.n_hidden_2 = 64
+args.data_x_train = x_train
+args.data_y_train = y_train
+args.data_x_val = x_test
+args.data_y_val = y_test
+
+mpc.train(args=args)
