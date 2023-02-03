@@ -18,22 +18,42 @@ random.seed(seed)
 
 class Args():
     def __init__(self) -> None:
-        self.batch_size = 16
-        self.lr = 0.001
+        self.batch_size = 32
+        self.lr = 0.0001
         self.in_dim = 1
-        self.out_dim = 2
-        self.n_hidden_1 = 32
-        self.n_hidden_2 = 16
-        self.epochs = 100
+        self.out_dim = 1
+        self.n_hidden_1 = 64
+        self.n_hidden_2 = 64
+        self.epochs = 2
         self.patience = 20
         self.device = "cpu"
-        self.data_train = np.random.randint(-20, 20, 10000)
-        self.label_train = (self.data_train > 8).astype(int)
-        self.data_train = self.data_train.reshape(-1, 1)
+        N = 1000000
+        self.data_x_train = np.random.rand(N).reshape(-1, 1) * 40 - 20
+        self.data_y_train = self.func(
+            self.data_x_train) + np.random.randn(N, 1)
 
-        self.data_val = np.random.randint(-15, 15, 50)
-        self.label_val = (self.data_val > 8).astype(int)
-        self.data_val = self.data_val.reshape(-1, 1)
+        self.data_x_val = np.random.rand(50).reshape(-1, 1) * 30 - 15
+        self.data_y_val = self.func(self.data_x_val)
+
+        self.data_x_mean = self.data_x_train.mean()
+        self.data_x_std = self.data_x_train.std()
+        self.data_y_mean = self.data_y_train.mean()
+        self.data_y_std = self.data_y_train.std()
+
+        self.norm_data()
+
+    def func(self, val):
+        return 3 * val * val - val - 1
+
+    def norm_data(self):
+        self.data_x_train = (self.data_x_train -
+                             self.data_x_mean) / (self.data_x_std + 1e-7)
+        self.data_y_train = (self.data_y_train -
+                             self.data_y_mean) / (self.data_y_std + 1e-7)
+        self.data_x_val = (self.data_x_val - self.data_x_mean) / \
+            (self.data_x_std + 1e-7)
+        self.data_y_val = (self.data_y_val - self.data_y_mean) / \
+            (self.data_y_std + 1e-7)
 
 
 class MPC_model(nn.Module):
@@ -92,82 +112,69 @@ class EarlyStopping():
 
 
 def train(args: Args):
-    train_dataset = TensorDataset(
-        torch.tensor(args.data_train, dtype=torch.float32), torch.tensor(args.label_train, dtype=torch.long))
+    train_dataset = TensorDataset(torch.tensor(
+        args.data_x_train), torch.tensor(args.data_y_train))
     train_dataloader = DataLoader(
         dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
     valid_dataset = TensorDataset(torch.tensor(
-        args.data_val, dtype=torch.float32), torch.tensor(args.label_val, dtype=torch.long))
+        args.data_x_val), torch.tensor(args.data_y_val))
     valid_dataloader = DataLoader(
         dataset=valid_dataset, batch_size=args.batch_size, shuffle=True)
 
     model = MPC_model(args.in_dim, args.n_hidden_1,
                       args.n_hidden_2, args.out_dim).to(args.device)  # 分类问题
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     train_epochs_loss = []
     valid_epochs_loss = []
-    train_acc = []
-    val_acc = []
 
-    early_stopping = EarlyStopping(patience=args.patience, verbose=True)
+    # early_stopping = EarlyStopping(patience=args.patience, verbose=True)
 
     for epoch in range(args.epochs):
         model.train()
         train_epoch_loss = []
-        acc, nums = 0, 0
         # =========================train=======================
-        for idx, (inputs, label) in enumerate(tqdm(train_dataloader)):
-            inputs = inputs.to(args.device)
-            label = label.to(args.device)
-            outputs = model(inputs)
+        for idx, (data_x, data_y) in enumerate(train_dataloader):
+            data_x = data_x.to(torch.float32).to(args.device)
+            data_y = data_y.to(torch.float32).to(args.device)
+            outputs = model(data_x)
             optimizer.zero_grad()
-            loss = criterion(outputs, label)
+            loss = criterion(data_y, outputs)
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0) #用来梯度裁剪
             optimizer.step()
             train_epoch_loss.append(loss.item())
-            acc += sum(outputs.max(axis=1)[1] == label).cpu()
-            nums += label.size()[0]
+            if idx % (len(train_dataloader)//2) == 0:
+                print("epoch={}/{}, {}/{} of train, loss={}".format(
+                    epoch, args.epochs, idx, len(train_dataloader), loss.item()))
         train_epochs_loss.append(np.average(train_epoch_loss))
-        train_acc.append(100 * acc / nums)
-        print("train acc = {:.3f}%, loss = {}".format(
-            100 * acc / nums, np.average(train_epoch_loss)))
-
         # =====================valid============================
         model.eval()
         valid_epoch_loss = []
-        acc, nums = 0, 0
-        for idx, (inputs, label) in enumerate(tqdm(valid_dataloader)):
-            inputs = inputs.to(args.device)
-            label = label.to(args.device)
-            outputs = model(inputs)
-            loss = criterion(outputs, label)
+        for idx, (data_x, data_y) in enumerate(valid_dataloader):
+            data_x = data_x.to(torch.float32).to(args.device)
+            data_y = data_y.to(torch.float32).to(args.device)
+            outputs = model(data_x)
+            loss = criterion(outputs, data_y)
             valid_epoch_loss.append(loss.item())
-            acc += sum(outputs.max(axis=1)[1] == label).cpu()
-            nums += label.size()[0]
         valid_epochs_loss.append(np.average(valid_epoch_loss))
-        val_acc.append(100 * acc / nums)
-
-        print("epoch = {}, valid acc = {:.2f}%, loss = {}".format(
-            epoch, 100 * acc / nums, np.average(valid_epoch_loss)))
         # ==================early stopping======================
-        early_stopping(
-            valid_epochs_loss[-1], model=model, path=r'./')
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
+        # early_stopping(
+        #     valid_epochs_loss[-1], model=model, path=r'./')
+        # if early_stopping.early_stop:
+        #     print("Early stopping")
+        #     break
         # ====================adjust lr========================
-        lr_adjust = {
-            2: 5e-5, 4: 1e-5, 6: 5e-6, 8: 1e-6,
-            10: 5e-7, 15: 1e-7, 20: 5e-8
-        }
-        if epoch in lr_adjust.keys():
-            lr = lr_adjust[epoch]
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-            print('Updating learning rate to {}'.format(lr))
+        # lr_adjust = {
+        #     2: 5e-5, 4: 1e-5, 6: 5e-6, 8: 1e-6,
+        #     10: 5e-7, 15: 1e-7, 20: 5e-8
+        # }
+        # if epoch in lr_adjust.keys():
+        #     lr = lr_adjust[epoch]
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = lr
+        #     print('Updating learning rate to {}'.format(lr))
 
     plt.figure(figsize=(12, 4))
     plt.subplot(121)
@@ -187,13 +194,14 @@ def pred(val, args: Args):
                       args.n_hidden_2, args.out_dim).to(args.device)
     model.load_state_dict(torch.load('model.pth'))
     model.eval()
-    val = torch.tensor(val).reshape(1, -1).float()
+    val_norm = (val - args.data_x_mean) / (args.data_x_std + 1e-7)
+    x = torch.tensor(val_norm).reshape(1, -1).float()
     # 需要转换成相应的输入shape，而且得带上batch_size，因此转换成shape=(1,1)这样的形状
-    res = model(val)
+    res = model(x)
+    res = res.item() * args.data_y_std + args.data_y_mean
+
     # real: tensor([[-5.2095, -0.9326]], grad_fn=<AddmmBackward0>) 需要找到最大值所在的列数，就是标签
-    res = res.max(axis=1)[1].item()
-    print("predicted label is {}, {} {} 8".format(
-        res, val.item(), ('>' if res == 1 else '<')))
+    print(f"model({val}), pre: {res}, expect: {args.func(val)}")
 
 
 # %%
@@ -202,4 +210,4 @@ if __name__ == '__main__':
     train(args)
     pred(24, args)
     pred(3.14, args)
-    pred(7.8, args)  # 这个会预测错误，所以数据量对于深度学习很重要
+    pred(7.8, args)
